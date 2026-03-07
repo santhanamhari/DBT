@@ -207,6 +207,13 @@ def parse_args():
     parser.add_argument('--cache_path', type=str, default=None, help='dir to cache images.')
     parser.add_argument('--drop_benign_side', action='store_true', default=False, help='If true, drops the samples from a beign breast on an exam that has a malignant one (one datasets that label by side)')
 
+    # DBT slice selection
+    parser.add_argument('--num_slices', type=int, default=None, help='Number of DBT slices to select from each volume. None means use all slices. [default: None]')
+    parser.add_argument('--slice_policy', type=str, default='center_crop', help='Policy for selecting slices from a DBT volume when num_slices != total frames. Options: center_crop, uniform, pad, grouped. [default: center_crop]')
+    parser.add_argument('--num_slice_groups', type=int, default=7, help='Number of groups for grouped DBT slice sampling (slice_policy=grouped). [default: 7]')
+    parser.add_argument('--slices_per_group', type=int, default=3, help='Number of adjacent slices per group for grouped DBT slice sampling. Use an odd value for symmetric windows around the group centre. [default: 3]')
+    parser.add_argument('--slice_group_jitter', type=int, default=0, help='Max ±jitter in slices applied to each group center during training for grouped sampling. 0 disables jitter. [default: 0]')
+
     # sampling
     parser.add_argument('--class_bal', action='store_true', default=False, help='Wether to apply a weighted sampler to balance between the classes on each batch.')
     parser.add_argument('--shift_class_bal_towards_imediate_cancers', action='store_true', default=False, help='Wether to apply a weighted sampler to balance between the classes on each batch.')
@@ -321,6 +328,11 @@ def parse_args():
     parser.add_argument('--pretrained_imagenet_model_name', type=str, default='resnet18', help='Name of pretrained model to load for custom resnets.')
     parser.add_argument('--make_fc', action='store_true', default=False, help='Replace last linear layer with convolutional layer')
     parser.add_argument('--replace_bn_with_gn', action='store_true', default=False, help='Use group normalization instead of batch norm.')
+
+    # mirai_full_25d_attn-specific
+    parser.add_argument('--slice_encoder_chunk_size', type=int, default=4, help='Number of DBT slices encoded in a single forward pass through the 2D encoder (mirai_full_25d_attn). Reduce to save GPU memory. [default: 4]')
+    parser.add_argument('--slice_attn_dropout', type=float, default=0.0, help='Dropout probability on raw attention logits in the depth aggregation module (mirai_full_25d_attn). [default: 0.0]')
+    parser.add_argument('--slice_token_drop', type=float, default=0.0, help='Probability of randomly masking each slice token before attention pooling during training (mirai_full_25d_attn). [default: 0.0]')
 
     # resnet-specific
     parser.add_argument('--block_layout', type=str, nargs='+', default=["BasicBlock,2", "BasicBlock,2", "BasicBlock,2", "BasicBlock,2"], help='Layout of blocks for a ResNet model. Must be a list of length 4. Each of the 4 elements is a string of form "block_name,num_repeats-block_name,num_repeats-...". [default: resnet18 layout]')

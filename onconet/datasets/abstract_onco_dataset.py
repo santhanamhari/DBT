@@ -55,6 +55,7 @@ class Abstract_Onco_Dataset(data.Dataset):
         self.image_loader = image_loader(args.cache_path,
                                                       transformers)
         self.image_loader.args = args
+        self.image_loader.is_training = (split_group == 'train')
 
         try:
             if 'json' in args.metadata_path:

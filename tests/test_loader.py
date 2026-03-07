@@ -160,5 +160,99 @@ class Test_image_loader(unittest.TestCase):
         self.assertFalse(loader.cache.exists(image_path, key))
 
 
+class TestGroupedSliceSampling(unittest.TestCase):
+    """Tests for the grouped DBT slice sampling logic."""
+
+    def _make_loader_with_args(self, **kwargs):
+        """Return a loader whose args contain the given keyword args."""
+        loader = image_loader.image_loader(None, [])
+
+        class FakeArgs:
+            pass
+
+        a = FakeArgs()
+        for k, v in kwargs.items():
+            setattr(a, k, v)
+        loader.args = a
+        return loader
+
+    # ------------------------------------------------------------------
+    # _select_grouped_slice_indices
+    # ------------------------------------------------------------------
+
+    def test_grouped_output_length(self):
+        """Output must have exactly num_slice_groups * slices_per_group entries."""
+        loader = self._make_loader_with_args(
+            num_slice_groups=7, slices_per_group=3, slice_group_jitter=0
+        )
+        indices = loader._select_grouped_slice_indices(60, is_training=False)
+        self.assertEqual(len(indices), 21)
+
+    def test_grouped_output_sorted(self):
+        """Indices must be returned in ascending order."""
+        loader = self._make_loader_with_args(
+            num_slice_groups=7, slices_per_group=3, slice_group_jitter=0
+        )
+        indices = loader._select_grouped_slice_indices(60, is_training=False)
+        self.assertEqual(indices, sorted(indices))
+
+    def test_grouped_indices_in_bounds(self):
+        """All indices must be in [0, num_frames - 1]."""
+        num_frames = 45
+        loader = self._make_loader_with_args(
+            num_slice_groups=7, slices_per_group=3, slice_group_jitter=2
+        )
+        for _ in range(20):
+            indices = loader._select_grouped_slice_indices(num_frames, is_training=True)
+            for idx in indices:
+                self.assertGreaterEqual(idx, 0)
+                self.assertLess(idx, num_frames)
+
+    def test_grouped_no_jitter_deterministic(self):
+        """Without jitter the output should be deterministic."""
+        loader = self._make_loader_with_args(
+            num_slice_groups=7, slices_per_group=3, slice_group_jitter=0
+        )
+        idx_a = loader._select_grouped_slice_indices(60, is_training=False)
+        idx_b = loader._select_grouped_slice_indices(60, is_training=False)
+        self.assertEqual(idx_a, idx_b)
+
+    def test_grouped_small_volume(self):
+        """Should not crash when num_frames < num_slice_groups * slices_per_group."""
+        loader = self._make_loader_with_args(
+            num_slice_groups=7, slices_per_group=3, slice_group_jitter=0
+        )
+        indices = loader._select_grouped_slice_indices(5, is_training=False)
+        self.assertEqual(len(indices), 21)
+        for idx in indices:
+            self.assertGreaterEqual(idx, 0)
+            self.assertLess(idx, 5)
+
+    def test_grouped_covers_full_depth(self):
+        """The spread groups should cover both ends of the volume."""
+        num_frames = 100
+        loader = self._make_loader_with_args(
+            num_slice_groups=7, slices_per_group=3, slice_group_jitter=0
+        )
+        indices = loader._select_grouped_slice_indices(num_frames, is_training=False)
+        # Lowest index must be near the start, highest near the end
+        self.assertLessEqual(min(indices), num_frames // 4)
+        self.assertGreaterEqual(max(indices), 3 * num_frames // 4)
+
+    # ------------------------------------------------------------------
+    # _select_slice_indices with policy="grouped"
+    # ------------------------------------------------------------------
+
+    def test_select_slice_indices_grouped_policy(self):
+        """Calling _select_slice_indices with policy='grouped' should
+        delegate to grouped logic and return G*S indices."""
+        loader = self._make_loader_with_args(
+            num_slice_groups=7, slices_per_group=3, slice_group_jitter=0
+        )
+        indices = loader._select_slice_indices(60, target_slices=15, policy="grouped")
+        self.assertEqual(len(indices), 21)
+        self.assertEqual(indices, sorted(indices))
+
+
 if __name__ == '__main__':
     unittest.main()

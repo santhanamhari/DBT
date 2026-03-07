@@ -1,5 +1,6 @@
 import onconet.models.discriminator
 import onconet.models.mirai_full
+import onconet.models.mirai_full_25d_attn
 import onconet.models.mmd
 import onconet.models.temporal_mmd
 import onconet.models.aggregate_hiddens

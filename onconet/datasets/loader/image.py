@@ -264,8 +264,23 @@ class image_loader:
     # -----------------------------
     # DICOM multi-frame as "batch of 2D slices"
     # -----------------------------
-    def _select_slice_indices(self, num_frames, target_slices, policy):
-        """Returns a list of indices into [0, num_frames)."""
+    def _select_slice_indices(self, num_frames, target_slices, policy, is_training=False):
+        """Returns a list of indices into [0, num_frames).
+
+        Supports the following policies:
+            center_crop: take ``target_slices`` slices centred in the volume.
+            uniform:     evenly sample ``target_slices`` indices.
+            pad:         use all real frames and zero-pad later if needed.
+            grouped:     spread ``num_slice_groups`` groups of ``slices_per_group``
+                         adjacent slices across the depth dimension.  Group centres
+                         may be jittered by ±``slice_group_jitter`` slices during
+                         training (set ``is_training=True``).  Always returns
+                         ``num_slice_groups * slices_per_group`` indices in depth
+                         order (``target_slices`` is ignored for this policy).
+        """
+        if policy == "grouped":
+            return self._select_grouped_slice_indices(num_frames, is_training)
+
         if target_slices is None or target_slices <= 0 or target_slices == num_frames:
             return list(range(num_frames))
 
@@ -288,6 +303,54 @@ class image_loader:
                 idx.append(idx[-1])
             return idx
         raise ValueError(f"Unknown slice_policy for upsampling: {policy}")
+
+    def _select_grouped_slice_indices(self, num_frames, is_training=False):
+        """Grouped slice sampling: G groups × S adjacent slices.
+
+        Spreads *G* group centres evenly across ``[0, num_frames - 1]``.  For
+        each centre ``c`` takes the ``S`` adjacent slices
+        ``[c - half, ..., c, ..., c + half]`` (where ``half = S // 2``).
+        During training, each centre is independently jittered by a uniformly
+        random integer in ``[-jitter, +jitter]`` (clamped to valid bounds).
+        All indices are clipped to ``[0, num_frames - 1]`` and returned in
+        ascending depth order with duplicates preserved (so the output always
+        has exactly ``G * S`` entries).
+
+        Config read from ``self.args``:
+            num_slice_groups  (int, default 7)
+            slices_per_group  (int, default 3)
+            slice_group_jitter (int, default 0)
+
+        Args:
+            num_frames:  total number of slices in the volume.
+            is_training: whether to apply centre jitter.
+
+        Returns:
+            list[int] of length ``num_slice_groups * slices_per_group``.
+        """
+        args = getattr(self, "args", None)
+        G = int(getattr(args, "num_slice_groups", 7)) if args is not None else 7
+        S = int(getattr(args, "slices_per_group", 3)) if args is not None else 3
+        jitter = int(getattr(args, "slice_group_jitter", 0)) if args is not None else 0
+
+        half = S // 2
+
+        # Evenly spread G group centres across [0, num_frames - 1]
+        if G == 1:
+            centres = [num_frames // 2]
+        else:
+            centres = np.linspace(0, num_frames - 1, G).round().astype(int).tolist()
+
+        indices = []
+        for c in centres:
+            if is_training and jitter > 0:
+                c = c + random.randint(-jitter, jitter)
+            # For each centre, collect S adjacent slice indices
+            for offset in range(-half, -half + S):
+                idx = int(np.clip(c + offset, 0, num_frames - 1))
+                indices.append(idx)
+
+        return sorted(indices)
 
     def _process_slices_consistently(
         self,
@@ -348,9 +411,10 @@ class image_loader:
         args = getattr(self, "args", None)
         target_slices = getattr(args, "num_slices", None) if args is not None else None
         policy = getattr(args, "slice_policy", "center_crop") if args is not None else "center_crop"
+        is_training = getattr(self, "is_training", False)
 
         num_frames = vol.shape[0]
-        idxs = self._select_slice_indices(num_frames, target_slices, policy)
+        idxs = self._select_slice_indices(num_frames, target_slices, policy, is_training=is_training)
 
         selected_slices = [vol[i] for i in idxs]
 

@@ -54,7 +54,7 @@ def wrap_model(model, allow_wrap_model, args, allow_data_parallel=True):
         model._model.args.use_precomputed_hiddens = args.use_precomputed_hiddens
     except:
         pass
-    if args.multi_image and not args.model_name in ['mirai_full']:
+    if args.multi_image and not args.model_name in ['mirai_full', 'mirai_full_25d_attn']:
         model = inflate_model(model)
 
     if allow_wrap_model and args.wrap_model:
