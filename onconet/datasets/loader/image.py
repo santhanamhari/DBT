@@ -194,6 +194,7 @@ class image_loader:
         num_workers: Optional[int] = None,
         *,
         consistent_across_slices: bool = True,
+        args=None,
     ):
         """Image + DBT/volumetric slice loader.
 
@@ -205,9 +206,12 @@ class image_loader:
                 If True, random transforms are synchronized so *every slice in a DBT
                 volume* receives the same random augmentation parameters (e.g., same
                 crop/flip). This is the common desired behavior for DBT.
+            args: Parsed CLI args (Namespace or None). Provides num_slices,
+                slice_policy, and slice_jitter.
         """
         self.transformers = transformers
         self.consistent_across_slices = consistent_across_slices
+        self.args = args
 
         # Auto-detect optimal number of workers
         if num_workers is None:
@@ -264,10 +268,30 @@ class image_loader:
     # -----------------------------
     # DICOM multi-frame as "batch of 2D slices"
     # -----------------------------
-    def _select_slice_indices(self, num_frames, target_slices, policy):
-        """Returns a list of indices into [0, num_frames)."""
+    def _select_slice_indices(self, num_frames, target_slices, policy, jitter=0):
+        """Returns a list of indices into [0, num_frames).
+
+        Supports policies:
+        - ``grouped`` / ``grouped_7x3`` (default): stratified 7-bin × 3-adjacent-slice
+          sampling.  When ``target_slices`` is 0 / None all frames are returned.
+        - ``center_crop``, ``uniform``, ``pad``: legacy policies.
+
+        Args:
+            num_frames: Total number of slices in the volume.
+            target_slices: Desired output slice count.  0 / None → all frames.
+            policy: Name of selection policy.
+            jitter: Max per-bin center offset sampled uniformly from
+                ``[-jitter, +jitter]`` (training augmentation).
+        """
+        # Normalise "grouped_7x3" to canonical name
+        if policy == "grouped_7x3":
+            policy = "grouped"
+
         if target_slices is None or target_slices <= 0 or target_slices == num_frames:
             return list(range(num_frames))
+
+        if policy == "grouped":
+            return self._grouped_slice_indices(num_frames, target_slices, jitter)
 
         if num_frames > target_slices:
             if policy == "center_crop":
@@ -288,6 +312,52 @@ class image_loader:
                 idx.append(idx[-1])
             return idx
         raise ValueError(f"Unknown slice_policy for upsampling: {policy}")
+
+    def _grouped_slice_indices(self, num_frames, target_slices, jitter=0):
+        """Stratified 7-bin × 3-adjacent-slice selection.
+
+        Divides depth into ``num_bins = target_slices // 3`` equal-width bins.
+        For each bin a center index is chosen (with optional jitter) and the
+        three adjacent slices (center-1, center, center+1) are selected.  All
+        indices are clamped to ``[0, num_frames-1]``.  Duplicate indices are
+        kept to preserve a fixed output length equal to ``target_slices``.
+
+        When ``target_slices % 3 != 0`` the last few bins select only the
+        required number of extra slices (1 or 2 from the center).
+        """
+        num_bins = target_slices // 3
+        remainder = target_slices % 3  # 0, 1, or 2
+
+        indices = []
+        for b in range(num_bins):
+            # Bin spans [b/num_bins, (b+1)/num_bins] of the volume depth.
+            bin_lo = b * num_frames / num_bins
+            bin_hi = (b + 1) * num_frames / num_bins
+            center = int(round((bin_lo + bin_hi) / 2.0))
+
+            if jitter > 0:
+                center += random.randint(-jitter, jitter)
+            center = max(0, min(num_frames - 1, center))
+
+            indices.extend([
+                max(0, center - 1),
+                center,
+                min(num_frames - 1, center + 1),
+            ])
+
+        if remainder > 0:
+            # Select from the tail portion of the volume that the regular bins did not cover.
+            bin_lo = num_frames if num_bins > 0 else 0
+            center = max(0, min(num_frames - 1, int(round((bin_lo + num_frames) / 2.0))))
+            if jitter > 0:
+                center += random.randint(-jitter, jitter)
+            center = max(0, min(num_frames - 1, center))
+            if remainder == 1:
+                indices.append(center)
+            else:
+                indices.extend([max(0, center - 1), center])
+
+        return indices
 
     def _process_slices_consistently(
         self,
@@ -345,12 +415,13 @@ class image_loader:
         vol = normalize_minmax(vol)  # (T, H, W)
 
         # Read slice control from args if present
-        args = getattr(self, "args", None)
+        args = self.args
         target_slices = getattr(args, "num_slices", None) if args is not None else None
-        policy = getattr(args, "slice_policy", "center_crop") if args is not None else "center_crop"
+        policy = getattr(args, "slice_policy", "grouped") if args is not None else "grouped"
+        jitter = getattr(args, "slice_jitter", 0) if args is not None else 0
 
         num_frames = vol.shape[0]
-        idxs = self._select_slice_indices(num_frames, target_slices, policy)
+        idxs = self._select_slice_indices(num_frames, target_slices, policy, jitter=jitter)
 
         selected_slices = [vol[i] for i in idxs]
 

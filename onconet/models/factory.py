@@ -75,7 +75,11 @@ def wrap_model(model, allow_wrap_model, args, allow_data_parallel=True):
         load_pretrained_weights(wrapped_model, torch.load(args.state_dict_path))
 
     # --- DDP wrapping (multi-node distributed) ---
-    if hasattr(args, 'distributed') and args.distributed and allow_data_parallel:
+    # Only wrap in factory when explicitly requested via --factory_wrap_ddp.
+    # scripts/main_ddp.py handles DDP wrapping itself, so this is False by default
+    # to prevent double DDP wrapping in distributed runs.
+    factory_wrap_ddp = getattr(args, 'factory_wrap_ddp', False)
+    if hasattr(args, 'distributed') and args.distributed and allow_data_parallel and factory_wrap_ddp:
         wrapped_model = wrapped_model.to(args.device)
         wrapped_model = DDP(
             wrapped_model,

@@ -358,6 +358,16 @@ def parse_args():
     # GE or Hologic or both types of Mammograms
     parser.add_argument('--mammogram_type', type=str, default=None, help='type of mammograms used to evaluate model')
 
+    # DBT slice sampling
+    parser.add_argument('--num_slices', type=int, default=21, help='Number of DBT slices to select per view (0 or negative means all slices) [default: 21]')
+    parser.add_argument('--slice_policy', type=str, default='grouped', help='Slice selection policy. Options: grouped (=grouped_7x3), center_crop, uniform, pad [default: grouped]')
+    parser.add_argument('--slice_jitter', type=int, default=0, help='Max random jitter (in slices) applied to grouped bin centers during training [default: 0]')
+    parser.add_argument('--slice_encoder_chunk_size', type=int, default=2, help='Number of slices to encode at once through the 2D encoder to avoid OOM [default: 2]')
+    parser.add_argument('--depth_stats_dropout', type=float, default=0.2, help='Dropout applied in the depth stats fusion MLP [default: 0.2]')
+
+    # Distributed training: DDP wrapping in factory
+    parser.add_argument('--factory_wrap_ddp', action='store_true', default=False, help='If set, factory.py wraps the model with DDP. Leave unset when scripts/main_ddp.py handles DDP wrapping.')
+
     # run
     parser.add_argument('--resume', action='store_true', default=False, help='whether to resume if run has already been done')
     parser.add_argument('--ignore_warnings', action='store_true', default=False, help='ignore all warnings')

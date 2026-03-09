@@ -64,40 +64,45 @@ echo "======================================"
 # ============================================================
 # Default training flags (can override via $@ or SLURM_EXTRA_FLAGS)
 # ============================================================
-DEFAULT_FLAGS="\
-    --model_name mirai_full \
-    --img_encoder_snapshot  /groups/dk3360_gp/hs3522/Mirai_DBT/Mirai/snapshots/mgh_mammo_MIRAI_Base_May20_2019.p \
-    --transformer_snapshot  /groups/dk3360_gp/hs3522/Mirai_DBT/Mirai/snapshots/mgh_mammo_cancer_MIRAI_Transformer_Jan13_2020.p \
-    --batch_size 32 \
-    --batch_splits 4 \
-    --cuda \
-    --distributed \
-    --dataset csv_mammo_risk_all_full_future \
-    --metadata_path /groups/dk3360_gp/hs3522/Mirai_DBT/Mirai/demo/custom_metadata.csv \
-    --img_mean 52.7232 \
-    --img_size 1024 1024\
-    --img_std 60.3772 \
-    --num_workers 4 \
-    --train \
-    --dev \
-    --test \
-    --init_lr 1e-5 \
-    --epochs 15 \
-    --dropout 0.1 \
-    --weight_decay 5e-05 \
-    --num_gpus 1 \
-    --tuning_metric c_index \
-    --save_dir /groups/dk3360_gp/hs3522/Mirai_DBT/Mirai/snapshot_distributed/ \
-    --results_path /groups/dk3360_gp/hs3522/Mirai_DBT/Mirai/logs/distributed_finetune \
-"
+DEFAULT_FLAGS=(
+    --model_name mirai_full
+    --img_encoder_snapshot  /groups/dk3360_gp/hs3522/Mirai_DBT/Mirai/snapshots/mgh_mammo_MIRAI_Base_May20_2019.p
+    --transformer_snapshot  /groups/dk3360_gp/hs3522/Mirai_DBT/Mirai/snapshots/mgh_mammo_cancer_MIRAI_Transformer_Jan13_2020.p
+    --batch_size 32
+    --batch_splits 4
+    --cuda
+    --distributed
+    --dataset csv_mammo_risk_all_full_future
+    --metadata_path /groups/dk3360_gp/hs3522/Mirai_DBT/Mirai/demo/custom_metadata.csv
+    --img_mean 52.7232
+    --img_size 1024 1024
+    --img_std 60.3772
+    --num_workers 4
+    --train
+    --dev
+    --test
+    --init_lr 1e-5
+    --epochs 15
+    --dropout 0.1
+    --weight_decay 5e-05
+    --num_gpus 1
+    --tuning_metric c_index
+    --save_dir /groups/dk3360_gp/hs3522/Mirai_DBT/Mirai/snapshot_distributed/
+    --results_path /groups/dk3360_gp/hs3522/Mirai_DBT/Mirai/logs/distributed_finetune
+    --num_slices 21
+    --slice_policy grouped
+    --slice_jitter 2
+    --slice_encoder_chunk_size 2
+    --depth_stats_dropout 0.2
+)
 
 # Merge defaults with any extra flags passed on the command line
-ALL_FLAGS="${DEFAULT_FLAGS} $@"
+ALL_FLAGS=("${DEFAULT_FLAGS[@]}" "$@")
 
 # ============================================================
 # Launch: one process per GPU via srun
 # ============================================================
-srun python -u /groups/dk3360_gp/hs3522/Mirai_DBT/Mirai/scripts/main_ddp.py ${ALL_FLAGS}
+srun python -u /groups/dk3360_gp/hs3522/Mirai_DBT/Mirai/scripts/main_ddp.py "${ALL_FLAGS[@]}"
 
 echo "============================================="
 echo "Distributed finetuning complete."
