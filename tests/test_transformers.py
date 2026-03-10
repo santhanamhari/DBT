@@ -107,6 +107,70 @@ class TestTransformers(unittest.TestCase):
             output = rotator(im, None)
             self.assertEqual(im, output)
 
+    def test_resize_and_pad_square_breast_on_left(self):
+        '''Breast on the left half → padding should appear on the right side.'''
+        self.args.img_size = (518, 518)
+        # Create a tall 'I' image (200 wide x 400 high) with a bright region
+        # on the LEFT half only (columns 0-99).
+        img = Image.new('I', (200, 400), 0)
+        bright_block = Image.new('I', (80, 300), 50000)
+        img.paste(bright_block, (0, 50))  # left-side bright region
+
+        transformer = ti.Resize_And_Pad_Square(self.args, self.kwargs)
+        output = transformer(img, None)
+
+        # Output must be exactly 518x518
+        self.assertEqual(output.size, (518, 518))
+
+        # The right column should be padded (zero), left column should be non-zero
+        arr = np.array(output)
+        self.assertEqual(arr[200, -1], 0,
+                         "Rightmost column should be padding (0) when breast is on left")
+        self.assertGreater(arr[200, 0], 0,
+                           "Leftmost column should contain breast content")
+
+    def test_resize_and_pad_square_breast_on_right(self):
+        '''Breast on the right half → padding should appear on the left side.'''
+        self.args.img_size = (518, 518)
+        img = Image.new('I', (200, 400), 0)
+        bright_block = Image.new('I', (80, 300), 50000)
+        img.paste(bright_block, (120, 50))  # right-side bright region
+
+        transformer = ti.Resize_And_Pad_Square(self.args, self.kwargs)
+        output = transformer(img, None)
+
+        self.assertEqual(output.size, (518, 518))
+
+        arr = np.array(output)
+        self.assertEqual(arr[200, 0], 0,
+                         "Leftmost column should be padding (0) when breast is on right")
+        self.assertGreater(arr[200, -1], 0,
+                           "Rightmost column should contain breast content")
+
+    def test_resize_and_pad_square_explicit_size_kwarg(self):
+        '''Explicit size kwarg overrides args.img_size.'''
+        self.args.img_size = (1664, 2048)
+        local_kwargs = {'size': '256'}
+        img = Image.new('I', (200, 300), 10000)
+        transformer = ti.Resize_And_Pad_Square(self.args, local_kwargs)
+        output = transformer(img, None)
+        self.assertEqual(output.size, (256, 256))
+
+    def test_resize_and_pad_square_pad_bottom_only(self):
+        '''Wide image (wider than tall) → vertical padding goes to the bottom.'''
+        self.args.img_size = (518, 518)
+        img = Image.new('I', (400, 200), 30000)
+        transformer = ti.Resize_And_Pad_Square(self.args, self.kwargs)
+        output = transformer(img, None)
+        self.assertEqual(output.size, (518, 518))
+        arr = np.array(output)
+        # Bottom row should be padding (0)
+        self.assertEqual(arr[-1, 259], 0,
+                         "Bottom row should be padding for a wide image")
+        # Top row should contain image content
+        self.assertGreater(arr[0, 259], 0,
+                           "Top row should contain image content")
+
     def test_tensor_normalize_tensor_2d(self):
         ''' Test normalizing a tensor with a certain mean and a certain std deviation.'''
         self.args.img_mean = 2

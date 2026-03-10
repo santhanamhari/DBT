@@ -349,6 +349,129 @@ class Align_To_Left(Abstract_transformer):
         else:
             return img
 
+@RegisterImageTransformer("resize_and_pad_square")
+class Resize_And_Pad_Square(Abstract_transformer):
+    '''
+    Resize a mammography / DBT frame with preserved aspect ratio so it fits
+    within target_size x target_size, then pad to an exact square.
+
+    Padding rules
+    -------------
+    - Vertical   : pad on the **bottom** only (top stays at the image edge).
+    - Horizontal : pad on the side **opposite** the breast so the breast
+                   region stays flush against its original edge.
+
+    The breast side is determined by counting pixels above *threshold* in the
+    left vs right half of the resized image.
+
+    Accepted kwargs (all optional)
+    --------------------------------
+    size            int   – target square side length; defaults to
+                            max(args.img_size) when img_size is a 2-tuple,
+                            or args.img_size directly when it is a scalar.
+    threshold       float – pixel value below which a pixel is considered
+                            background (default 0).
+    pad_value       int   – fill value used for padding (default 0).
+    pad_bottom_only bool  – when True (default) vertical pad goes to bottom;
+                            when False it is split top/bottom (centred).
+    debug           bool  – when True, save debug images to /tmp (default False).
+    '''
+
+    def __init__(self, args, kwargs):
+        super(Resize_And_Pad_Square, self).__init__()
+
+        # ------------------------------------------------------------------
+        # Determine target size
+        # ------------------------------------------------------------------
+        if 'size' in kwargs:
+            self.size = int(kwargs['size'])
+        else:
+            img_size = args.img_size
+            if isinstance(img_size, (list, tuple)):
+                self.size = max(img_size)
+            else:
+                self.size = int(img_size)
+
+        self.threshold = float(kwargs['threshold']) if 'threshold' in kwargs else 0.0
+        self.pad_value = int(kwargs['pad_value']) if 'pad_value' in kwargs else 0
+
+        # Accept both bool and "true"/"false" strings (kwargs from CLI are strings)
+        raw_pb = kwargs.get('pad_bottom_only', True)
+        if isinstance(raw_pb, str):
+            self.pad_bottom_only = raw_pb.lower() not in ('false', '0', 'no')
+        else:
+            self.pad_bottom_only = bool(raw_pb)
+
+        raw_debug = kwargs.get('debug', False)
+        if isinstance(raw_debug, str):
+            self.debug = raw_debug.lower() in ('true', '1', 'yes')
+        else:
+            self.debug = bool(raw_debug)
+
+        self.set_cachable(self.size)
+
+    def __call__(self, img, additional=None):
+        # ------------------------------------------------------------------
+        # Normalise to PIL mode 'I' (32-bit signed integer grayscale)
+        # ------------------------------------------------------------------
+        if img.mode == 'I;16':
+            arr = np.frombuffer(img.tobytes(), dtype=np.uint16).reshape(
+                img.size[1], img.size[0])
+            img = Image.fromarray(arr.astype(np.int32), mode='I')
+        else:
+            img = img.convert('I')
+
+        orig_w, orig_h = img.size
+        size = self.size
+
+        # ------------------------------------------------------------------
+        # Resize with preserved aspect ratio
+        # ------------------------------------------------------------------
+        scale = min(size / orig_w, size / orig_h)
+        new_w = int(orig_w * scale)
+        new_h = int(orig_h * scale)
+        resized = img.resize((new_w, new_h), Image.LANCZOS)
+
+        # ------------------------------------------------------------------
+        # Determine breast side on the resized image
+        # ------------------------------------------------------------------
+        arr = np.array(resized)
+        mid_x = new_w // 2
+        left_count = int((arr[:, :mid_x] > self.threshold).sum())
+        right_count = int((arr[:, mid_x:] > self.threshold).sum())
+        breast_on_left = left_count >= right_count
+
+        # ------------------------------------------------------------------
+        # Compute padding amounts
+        # ------------------------------------------------------------------
+        pad_w = size - new_w  # total horizontal padding needed
+        pad_h = size - new_h  # total vertical padding needed
+
+        # Horizontal: opposite side to breast
+        if breast_on_left:
+            pad_left, pad_right = 0, pad_w
+        else:
+            pad_left, pad_right = pad_w, 0
+
+        # Vertical
+        if self.pad_bottom_only:
+            pad_top, pad_bottom = 0, pad_h
+        else:
+            pad_top = pad_h // 2
+            pad_bottom = pad_h - pad_top
+
+        if self.debug:
+            resized.save('/tmp/resize_pad_debug.png')
+
+        # ImageOps.expand border order: (left, top, right, bottom)
+        padded = ImageOps.expand(
+            resized,
+            (pad_left, pad_top, pad_right, pad_bottom),
+            fill=self.pad_value,
+        )
+        return padded
+
+
 @RegisterImageTransformer("grayscale")
 class Grayscale(Abstract_transformer):
     '''
